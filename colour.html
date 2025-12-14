@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ford FG Falcon ICC - HVAC Display (SocketCAN)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a12;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            padding: 15px;
+        }
+
+        h1 {
+            color: #90b8d8;
+            font-size: 18px;
+            margin-bottom: 10px;
+            text-shadow: 0 0 10px rgba(100, 150, 200, 0.5);
+        }
+
+        /* Connection status */
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+            padding: 8px 15px;
+            background: #101828;
+            border-radius: 20px;
+            border: 1px solid #3a5070;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4444;
+            box-shadow: 0 0 8px #ff4444;
+            transition: all 0.3s;
+        }
+
+        .status-dot.connected {
+            background: #44ff44;
+            box-shadow: 0 0 8px #44ff44;
+        }
+
+        .status-text {
+            color: #90b8d8;
+            font-size: 12px;
+        }
+
+        /* Main display container */
+        .hvac-display {
+            position: relative;
+            width: 800px;
+            height: 180px;
+            background: linear-gradient(180deg, #1a2535 0%, #0d1520 50%, #1a2535 100%);
+            border-radius: 15px;
+            border: 2px solid #3a5070;
+            box-shadow: 
+                0 0 20px rgba(80, 150, 220, 0.3),
+                inset 0 0 30px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            overflow: hidden;
+        }
+
+        /* Scanlines overlay */
+        .hvac-display::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 20, 40, 0.25) 2px,
+                rgba(0, 20, 40, 0.25) 4px
+            );
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* Clock circle */
+        .clock-container {
+            position: relative;
+            width: 160px;
+            height: 160px;
+            flex-shrink: 0;
+        }
+
+        .clock-outer {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2a3a50 0%, #0a1525 50%, #2a3a50 100%);
+            box-shadow: 
+                0 0 25px rgba(80, 140, 200, 0.4),
+                inset 0 0 20px rgba(0, 0, 0, 0.8);
+        }
+
+        .clock-inner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 125px;
+            height: 125px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #0a1020 0%, #050810 100%);
+            border: 2px solid #4080c0;
+            box-shadow: 
+                0 0 15px rgba(60, 120, 180, 0.5),
+                inset 0 0 10px rgba(60, 120, 180, 0.2);
+        }
+
+        .clock-ticks {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 100%;
+            height: 100%;
+            transform: translate(-50%, -50%);
+        }
+
+        .tick {
+            position: absolute;
+            background: #5090c0;
+            left: 50%;
+            box-shadow: 0 0 3px rgba(80, 160, 220, 0.8);
+        }
+
+        .tick.hour {
+            width: 3px;
+            height: 10px;
+            top: 6px;
+            margin-left: -1.5px;
+        }
+
+        .tick.minute {
+            width: 2px;
+            height: 5px;
+            top: 10px;
+            margin-left: -1px;
+        }
+
+        .clock-time {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -65%);
+            color: #c0e0ff;
+            font-size: 30px;
+            font-weight: bold;
+            font-family: 'Consolas', 'Courier New', monospace;
+            text-shadow: 
+                0 0 10px rgba(150, 200, 255, 0.8),
+                0 0 20px rgba(100, 160, 220, 0.5);
+            letter-spacing: 2px;
+        }
+
+        .clock-date {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, 55%);
+            color: #80a0c0;
+            font-size: 12px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            text-shadow: 0 0 5px rgba(100, 150, 200, 0.5);
+        }
+
+        /* Temperature display boxes */
+        .temp-box {
+            position: relative;
+            width: 140px;
+            height: 100px;
+            background: linear-gradient(180deg, #1a2535 0%, #0a1018 50%, #1a2535 100%);
+            border-radius: 12px;
+            border: 2px solid #3a6090;
+            box-shadow: 
+                0 0 15px rgba(60, 120, 180, 0.4),
+                inset 0 0 15px rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0 15px;
+        }
+
+        .temp-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 10%;
+            right: 10%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #5090c0, transparent);
+        }
+
+        .temp-label {
+            color: #90b0d0;
+            font-size: 13px;
+            margin-bottom: 5px;
+            text-shadow: 0 0 5px rgba(100, 150, 200, 0.5);
+        }
+
+        .temp-value {
+            color: #d0e8ff;
+            font-size: 36px;
+            font-weight: bold;
+            font-family: 'Consolas', 'Courier New', monospace;
+            text-shadow: 
+                0 0 15px rgba(150, 200, 255, 0.8),
+                0 0 30px rgba(100, 160, 220, 0.4);
+            letter-spacing: 1px;
+        }
+
+        /* Center icons area */
+        .center-icons {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            padding: 0 10px;
+        }
+
+        .icons-top {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 8px;
+        }
+
+        .icons-bottom {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+
+        .icon {
+            color: #70a0d0;
+            filter: drop-shadow(0 0 5px rgba(80, 140, 200, 0.6));
+        }
+
+        .icon.active {
+            color: #90c0e0;
+            filter: drop-shadow(0 0 8px rgba(100, 180, 255, 0.8));
+        }
+
+        /* Status bar */
+        .status-bar {
+            width: 800px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 25px;
+            margin-top: 12px;
+            background: linear-gradient(180deg, #1a2535 0%, #0d1520 100%);
+            border-radius: 10px;
+            border: 1px solid #3a5070;
+            box-shadow: 0 0 15px rgba(80, 150, 220, 0.2);
+        }
+
+        .status-item {
+            color: #90b8d8;
+            font-size: 13px;
+            text-shadow: 0 0 5px rgba(100, 150, 200, 0.4);
+        }
+
+        .status-item.highlight {
+            color: #c0e0ff;
+            text-shadow: 0 0 10px rgba(150, 200, 255, 0.6);
+        }
+
+        /* Fan control */
+        .fan-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .fan-bar {
+            display: flex;
+            gap: 3px;
+        }
+
+        .fan-segment {
+            width: 14px;
+            height: 20px;
+            background: #1a2535;
+            border: 1px solid #3a5070;
+            border-radius: 2px;
+            transition: all 0.2s;
+        }
+
+        .fan-segment.active {
+            background: linear-gradient(180deg, #4080c0 0%, #2060a0 100%);
+            border-color: #60a0d0;
+            box-shadow: 0 0 8px rgba(80, 160, 220, 0.6);
+        }
+
+        /* Buttons */
+        .btn {
+            background: linear-gradient(180deg, #1a2838 0%, #0a1420 100%);
+            border: 1px solid #3a5878;
+            border-radius: 6px;
+            color: #90b0d0;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: linear-gradient(180deg, #2a3848 0%, #1a2430 100%);
+            border-color: #5080b0;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+        }
+
+        .fan-btn {
+            width: 32px;
+            height: 32px;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Button panel */
+        .button-panel {
+            width: 800px;
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px;
+            margin-top: 12px;
+            background: linear-gradient(180deg, #1a2535 0%, #0d1520 100%);
+            border-radius: 10px;
+            border: 1px solid #3a5070;
+        }
+
+        .hvac-btn {
+            width: 75px;
+            height: 50px;
+            font-size: 11px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+        }
+
+        .hvac-btn.active {
+            background: linear-gradient(180deg, #2a4060 0%, #1a3050 50%, #2a4060 100%);
+            border-color: #60a0d0;
+            color: #c0e0ff;
+            box-shadow: 
+                0 0 20px rgba(80, 160, 220, 0.5),
+                inset 0 0 10px rgba(80, 160, 220, 0.2);
+        }
+
+        .hvac-btn svg {
+            width: 22px;
+            height: 22px;
+        }
+
+        .temp-control {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .temp-control-label {
+            color: #70a0c0;
+            font-size: 10px;
+        }
+
+        .temp-btns {
+            display: flex;
+            gap: 4px;
+        }
+
+        .temp-btn {
+            width: 28px;
+            height: 28px;
+            font-size: 16px;
+        }
+
+        /* CAN Log */
+        .can-log {
+            width: 800px;
+            max-height: 150px;
+            overflow-y: auto;
+            margin-top: 12px;
+            padding: 10px;
+            background: #0a1018;
+            border-radius: 8px;
+            border: 1px solid #2a3a50;
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+        }
+
+        .can-log-entry {
+            padding: 2px 0;
+            border-bottom: 1px solid #1a2535;
+        }
+
+        .can-log-entry.rx {
+            color: #60c060;
+        }
+
+        .can-log-entry.tx {
+            color: #6090c0;
+        }
+
+        .can-log-entry .timestamp {
+            color: #606080;
+            margin-right: 10px;
+        }
+
+        .can-log-entry .can-id {
+            color: #c0a060;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Ford FG Falcon ICC - HVAC Display</h1>
+    
+    <!-- Connection Status -->
+    <div class="connection-status">
+        <div class="status-dot" id="statusDot"></div>
+        <span class="status-text" id="statusText">Connecting to CAN bridge...</span>
+    </div>
+    
+    <!-- Main HVAC Display -->
+    <div class="hvac-display">
+        <!-- Clock -->
+        <div class="clock-container">
+            <div class="clock-outer"></div>
+            <div class="clock-inner">
+                <div class="clock-ticks" id="clockTicks"></div>
+            </div>
+            <div class="clock-time" id="clockTime">12:00</div>
+            <div class="clock-date" id="clockDate">01-01-08</div>
+        </div>
+
+        <!-- Passenger Temperature -->
+        <div class="temp-box">
+            <span class="temp-label">Passenger</span>
+            <span class="temp-value" id="passengerTemp">22.0°</span>
+        </div>
+
+        <!-- Center Icons -->
+        <div class="center-icons">
+            <div class="icons-top">
+                <!-- Heated Seat Icon -->
+                <svg class="icon" id="iconHeatedSeat" width="45" height="45" viewBox="0 0 50 50">
+                    <path d="M20 8 Q18 8 18 10 L18 20 Q18 22 20 22 L30 22 Q32 22 32 20 L32 10 Q32 8 30 8 Z" 
+                          fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M18 22 L15 35 Q14 38 17 38 L33 38 Q36 38 35 35 L32 22" 
+                          fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M22 12 Q24 14 22 16 Q24 18 22 20" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M26 12 Q28 14 26 16 Q28 18 26 20" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+
+                <!-- Recirc Icon -->
+                <svg class="icon" id="iconRecirc" width="40" height="40" viewBox="0 0 50 50">
+                    <circle cx="25" cy="15" r="8" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <ellipse cx="25" cy="35" rx="12" ry="8" fill="currentColor" opacity="0.6"/>
+                </svg>
+            </div>
+
+            <div class="icons-bottom">
+                <!-- Seat with Person -->
+                <svg class="icon" width="55" height="45" viewBox="0 0 60 50">
+                    <circle cx="35" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M35 14 L33 28" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M20 40 L24 10 Q25 8 28 8 L32 8" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M20 40 L50 40" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M33 28 L45 40" fill="none" stroke="currentColor" stroke-width="2"/>
+                </svg>
+
+                <!-- Car Profile -->
+                <svg class="icon" width="60" height="35" viewBox="0 0 70 40">
+                    <path d="M5 28 L12 20 L22 12 L48 12 L58 20 L65 28 L65 32 L5 32 Z" 
+                          fill="none" stroke="currentColor" stroke-width="2"/>
+                    <path d="M22 14 L24 20 L46 20 L48 14" fill="none" stroke="currentColor" stroke-width="1"/>
+                    <circle cx="18" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <circle cx="52" cy="32" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
+                </svg>
+            </div>
+        </div>
+
+        <!-- Driver Temperature -->
+        <div class="temp-box">
+            <span class="temp-label">Driver</span>
+            <span class="temp-value" id="driverTemp">22.0°</span>
+        </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <span class="status-item">Outside: <span id="outsideTemp">20°C</span></span>
+        <span class="status-item highlight" id="acStatus">A/C Off</span>
+        <span class="status-item highlight" id="modeStatus">Semi-Auto</span>
+        <div class="fan-control">
+            <button class="btn fan-btn" onclick="sendButton('fan_down')">−</button>
+            <svg width="20" height="20" viewBox="0 0 20 20" style="color: #70a0d0;">
+                <path d="M10 0 L10 8 M10 12 L10 20 M0 10 L8 10 M12 10 L20 10 M3 3 L7 7 M13 13 L17 17 M3 17 L7 13 M13 7 L17 3" 
+                      stroke="currentColor" stroke-width="2" fill="none"/>
+            </svg>
+            <div class="fan-bar" id="fanBar"></div>
+            <button class="btn fan-btn" onclick="sendButton('fan_up')">+</button>
+        </div>
+    </div>
+
+    <!-- Button Panel -->
+    <div class="button-panel">
+        <button class="btn hvac-btn" id="btnOff" onclick="sendButton('off')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="9"/>
+                <line x1="12" y1="3" x2="12" y2="9"/>
+            </svg>
+            OFF
+        </button>
+        <button class="btn hvac-btn" id="btnRecirc" onclick="sendButton('recirc')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 12 A8 8 0 0 1 20 12"/>
+                <path d="M18 8 L20 12 L16 12"/>
+            </svg>
+            Recirc
+        </button>
+        <button class="btn hvac-btn" id="btnAC" onclick="sendButton('ac')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2 L12 22 M2 12 L22 12 M4.9 4.9 L19.1 19.1 M4.9 19.1 L19.1 4.9"/>
+            </svg>
+            A/C
+        </button>
+        <button class="btn hvac-btn" id="btnAuto" onclick="sendButton('auto')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <text x="5" y="16" font-size="11" fill="currentColor" stroke="none">A</text>
+            </svg>
+            AUTO
+        </button>
+        <button class="btn hvac-btn" id="btnFrontDef" onclick="sendButton('front_defrost')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 17 L8 5 L16 5 L21 17"/>
+                <path d="M8 8 L8 14 M12 8 L12 14 M16 8 L16 14"/>
+            </svg>
+            Front
+        </button>
+        <button class="btn hvac-btn" id="btnRearDef" onclick="sendButton('rear_defrost')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="4" y="6" width="16" height="12" rx="1"/>
+                <line x1="6" y1="10" x2="18" y2="10"/>
+                <line x1="6" y1="14" x2="18" y2="14"/>
+            </svg>
+            Rear
+        </button>
+        <button class="btn hvac-btn" id="btnDual" onclick="sendButton('dual')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="6" width="7" height="12" rx="1"/>
+                <rect x="14" y="6" width="7" height="12" rx="1"/>
+            </svg>
+            DUAL
+        </button>
+        <div class="temp-control">
+            <span class="temp-control-label">Passenger</span>
+            <div class="temp-btns">
+                <button class="btn temp-btn" onclick="sendButton('passenger_temp_down')">−</button>
+                <button class="btn temp-btn" onclick="sendButton('passenger_temp_up')">+</button>
+            </div>
+        </div>
+        <div class="temp-control">
+            <span class="temp-control-label">Driver</span>
+            <div class="temp-btns">
+                <button class="btn temp-btn" onclick="sendButton('driver_temp_down')">−</button>
+                <button class="btn temp-btn" onclick="sendButton('driver_temp_up')">+</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CAN Log -->
+    <div class="can-log" id="canLog">
+        <div style="color: #606080; text-align: center;">CAN Message Log</div>
+    </div>
+
+    <script>
+        // =====================================================================
+        // Configuration
+        // =====================================================================
+        
+        const CONFIG = {
+            wsUrl: 'ws://localhost:8765',
+            reconnectDelay: 3000,
+            maxLogEntries: 50
+        };
+
+        // =====================================================================
+        // State
+        // =====================================================================
+        
+        let state = {
+            connected: false,
+            passengerTemp: 22.0,
+            driverTemp: 22.0,
+            outsideTemp: 20,
+            fanSpeed: 4,
+            maxFan: 7,
+            acOn: false,
+            autoMode: false,
+            recircOn: false,
+            systemOn: true,
+            frontDefrost: false,
+            rearDefrost: false,
+            dualZone: true,
+            airDirection: 0
+        };
+
+        let ws = null;
+
+        // =====================================================================
+        // WebSocket Connection
+        // =====================================================================
+        
+        function connect() {
+            updateConnectionStatus(false, 'Connecting...');
+            
+            try {
+                ws = new WebSocket(CONFIG.wsUrl);
+                
+                ws.onopen = () => {
+                    updateConnectionStatus(true, 'Connected to CAN Bridge');
+                    addLogEntry('system', 'WebSocket connected to ' + CONFIG.wsUrl);
+                };
+                
+                ws.onclose = () => {
+                    updateConnectionStatus(false, 'Disconnected - Reconnecting...');
+                    addLogEntry('system', 'WebSocket disconnected');
+                    setTimeout(connect, CONFIG.reconnectDelay);
+                };
+                
+                ws.onerror = (error) => {
+                    addLogEntry('error', 'WebSocket error');
+                    console.error('WebSocket error:', error);
+                };
+                
+                ws.onmessage = (event) => {
+                    handleMessage(JSON.parse(event.data));
+                };
+                
+            } catch (error) {
+                console.error('Connection error:', error);
+                updateConnectionStatus(false, 'Connection failed');
+                setTimeout(connect, CONFIG.reconnectDelay);
+            }
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'status':
+                    updateState(msg.data);
+                    addLogEntry('rx', `0x353: ${formatStateForLog(msg.data)}`);
+                    break;
+                    
+                case 'button_sent':
+                    addLogEntry('tx', `${msg.can_id}: [${msg.data}] (${msg.button})`);
+                    break;
+                    
+                case 'pong':
+                    // Keepalive response
+                    break;
+            }
+        }
+
+        function updateState(data) {
+            if (data.driver_temp !== undefined) state.driverTemp = data.driver_temp;
+            if (data.passenger_temp !== undefined) state.passengerTemp = data.passenger_temp;
+            if (data.outside_temp !== undefined) state.outsideTemp = data.outside_temp;
+            if (data.fan_speed !== undefined) state.fanSpeed = data.fan_speed;
+            if (data.ac_on !== undefined) state.acOn = data.ac_on;
+            if (data.auto_mode !== undefined) state.autoMode = data.auto_mode;
+            if (data.recirc !== undefined) state.recircOn = data.recirc;
+            if (data.system_on !== undefined) state.systemOn = data.system_on;
+            if (data.front_defrost !== undefined) state.frontDefrost = data.front_defrost;
+            if (data.rear_defrost !== undefined) state.rearDefrost = data.rear_defrost;
+            if (data.dual_zone !== undefined) state.dualZone = data.dual_zone;
+            if (data.air_direction !== undefined) state.airDirection = data.air_direction;
+            
+            updateDisplay();
+        }
+
+        function formatStateForLog(data) {
+            return `Drv:${data.driver_temp?.toFixed(1)}° Pass:${data.passenger_temp?.toFixed(1)}° Fan:${data.fan_speed} AC:${data.ac_on ? 'On' : 'Off'}`;
+        }
+
+        // =====================================================================
+        // Send Button Commands (TX on 0x307)
+        // =====================================================================
+        
+        function sendButton(button) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLogEntry('error', 'Not connected to CAN bridge');
+                return;
+            }
+            
+            const msg = {
+                type: 'button',
+                button: button
+            };
+            
+            ws.send(JSON.stringify(msg));
+            
+            // Visual feedback
+            flashButton(button);
+        }
+
+        function flashButton(button) {
+            const btnMap = {
+                'off': 'btnOff',
+                'recirc': 'btnRecirc',
+                'ac': 'btnAC',
+                'auto': 'btnAuto',
+                'front_defrost': 'btnFrontDef',
+                'rear_defrost': 'btnRearDef',
+                'dual': 'btnDual'
+            };
+            
+            const btnId = btnMap[button];
+            if (btnId) {
+                const btn = document.getElementById(btnId);
+                if (btn) {
+                    btn.style.transform = 'scale(0.95)';
+                    setTimeout(() => { btn.style.transform = ''; }, 100);
+                }
+            }
+        }
+
+        // =====================================================================
+        // Display Updates
+        // =====================================================================
+        
+        function updateDisplay() {
+            // Temperatures
+            document.getElementById('passengerTemp').textContent = state.passengerTemp.toFixed(1) + '°';
+            document.getElementById('driverTemp').textContent = state.driverTemp.toFixed(1) + '°';
+            document.getElementById('outsideTemp').textContent = state.outsideTemp.toFixed(0) + '°C';
+            
+            // Status labels
+            document.getElementById('acStatus').textContent = state.acOn ? 'A/C On' : 'A/C Off';
+            document.getElementById('modeStatus').textContent = state.autoMode ? 'Auto' : 'Semi-Auto';
+            
+            // Fan bar
+            updateFanBar();
+            
+            // Button states
+            updateButtonState('btnOff', !state.systemOn);
+            updateButtonState('btnRecirc', state.recircOn);
+            updateButtonState('btnAC', state.acOn);
+            updateButtonState('btnAuto', state.autoMode);
+            updateButtonState('btnFrontDef', state.frontDefrost);
+            updateButtonState('btnRearDef', state.rearDefrost);
+            updateButtonState('btnDual', state.dualZone);
+            
+            // Icon states
+            document.getElementById('iconRecirc').classList.toggle('active', state.recircOn);
+        }
+
+        function updateButtonState(id, active) {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.classList.toggle('active', active);
+            }
+        }
+
+        function updateFanBar() {
+            const fanBar = document.getElementById('fanBar');
+            const segments = fanBar.querySelectorAll('.fan-segment');
+            segments.forEach((seg, i) => {
+                seg.classList.toggle('active', i < state.fanSpeed);
+            });
+        }
+
+        function updateConnectionStatus(connected, text) {
+            state.connected = connected;
+            const dot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            
+            dot.classList.toggle('connected', connected);
+            statusText.textContent = text;
+        }
+
+        // =====================================================================
+        // CAN Log
+        // =====================================================================
+        
+        function addLogEntry(type, message) {
+            const log = document.getElementById('canLog');
+            const entry = document.createElement('div');
+            entry.className = 'can-log-entry ' + type;
+            
+            const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+            entry.innerHTML = `<span class="timestamp">${timestamp}</span>${message}`;
+            
+            log.appendChild(entry);
+            
+            // Keep only last N entries
+            while (log.children.length > CONFIG.maxLogEntries) {
+                log.removeChild(log.children[1]); // Keep header
+            }
+            
+            // Scroll to bottom
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // =====================================================================
+        // Clock
+        // =====================================================================
+        
+        function initClockTicks() {
+            const ticksContainer = document.getElementById('clockTicks');
+            ticksContainer.innerHTML = '';
+            
+            for (let i = 0; i < 60; i++) {
+                const tick = document.createElement('div');
+                tick.className = i % 5 === 0 ? 'tick hour' : 'tick minute';
+                const angle = i * 6;
+                tick.style.transformOrigin = 'center 62px';
+                tick.style.transform = `rotate(${angle}deg) translateX(-50%)`;
+                ticksContainer.appendChild(tick);
+            }
+        }
+
+        function initFanBar() {
+            const fanBar = document.getElementById('fanBar');
+            fanBar.innerHTML = '';
+            
+            for (let i = 0; i < state.maxFan; i++) {
+                const segment = document.createElement('div');
+                segment.className = 'fan-segment' + (i < state.fanSpeed ? ' active' : '');
+                fanBar.appendChild(segment);
+            }
+        }
+
+        function updateClock() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = String(now.getFullYear() % 100).padStart(2, '0');
+            
+            document.getElementById('clockTime').textContent = `${hours}:${minutes}`;
+            document.getElementById('clockDate').textContent = `${day}-${month}-${year}`;
+        }
+
+        // =====================================================================
+        // Initialization
+        // =====================================================================
+        
+        function init() {
+            initClockTicks();
+            initFanBar();
+            updateClock();
+            updateDisplay();
+            
+            // Start clock update
+            setInterval(updateClock, 1000);
+            
+            // Connect to WebSocket
+            connect();
+            
+            addLogEntry('system', 'HVAC Display initialized');
+            addLogEntry('system', 'RX: 0x353 (HVAC Status) | TX: 0x307 (Button Commands)');
+        }
+
+        // Start when page loads
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
